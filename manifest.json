@@ -1,0 +1,18 @@
+{
+  "manifest_version": 2,
+  "name": "Ungerman",
+  "version": "1.0.0",
+  "description": "When replying to a message whose subject already starts with 'AW: ', does not prefix anything (avoids 'AW: AW: ...' or 'Re: AW: ...' stacking).",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "ungerman@64kramsystem.github.io",
+      "strict_min_version": "78.0"
+    }
+  },
+  "background": {
+    "scripts": ["subject.js", "background.js"]
+  },
+  "permissions": [
+    "compose"
+  ]
+}
