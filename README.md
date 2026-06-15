@@ -35,7 +35,7 @@ forwards.
 For temporary install during development: *Add-ons Manager* → gear icon →
 *Debug Add-ons* → *Load Temporary Add-on* → pick `manifest.json`.
 
-Requires Thunderbird 78 or newer.
+Requires Thunderbird 91 or newer (`background.js` uses `Tab.type`, added in 91).
 
 ## Tests
 
