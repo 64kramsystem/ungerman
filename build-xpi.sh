@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Packages the extension into ungerman.xpi (a zip of manifest.json + background.js).
+# Packages the extension into ungerman.xpi (manifest, background scripts, and icons).
 # Run from the repo root.
 
 set -o errexit
@@ -11,6 +11,6 @@ cd "$(dirname "$(readlink -f "$0")")"
 output="ungerman.xpi"
 
 rm -f "$output"
-zip -r -FS "$output" manifest.json subject.js background.js
+zip -r -FS "$output" manifest.json subject.js background.js icons
 
 echo "Built $output"
