@@ -19,6 +19,46 @@ test("matches reply prefix case-insensitively", () => {
   assert.equal(unstackSubject("RE: AW: Foo"), "AW: Foo");
 });
 
+test("collapses the entire mixed chain when replying to an already stacked subject", () => {
+  const subject = "AW: Re: Aw: Aw: Martin IL MIGLIORE!!!!";
+  for (const addedPrefix of ["", "Re: ", "AW: ", "Antwort: "]) {
+    const fixed = unstackSubject(addedPrefix + subject);
+    assert.equal(fixed, "Aw: Martin IL MIGLIORE!!!!");
+    assert.equal(unstackSubject(fixed), fixed);
+  }
+});
+
+test("collapses reply prefixes after the last AW: too", () => {
+  assert.equal(unstackSubject("AW: Re: Antwort: Foo"), "AW: Foo");
+  assert.equal(unstackSubject("Re: Aw: Re: Foo"), "Aw: Foo");
+});
+
+test("continues to recognize forwarding prefixes in reply subjects", () => {
+  for (const prefix of ["WG", "Fw", "Fwd"]) {
+    assert.equal(unstackSubject(`${prefix}: Re: AW: Foo`), "AW: Foo");
+  }
+});
+
+test("handles prefixes with missing or extra whitespace", () => {
+  assert.equal(unstackSubject("Re:AW:Aw:Foo"), "Aw:Foo");
+  assert.equal(unstackSubject("AW :\tRe:  Aw :  Foo"), "Aw :  Foo");
+});
+
+test("leaves prefix chains without AW: untouched", () => {
+  const subject = "Re: Antwort: Re: Foo";
+  assert.equal(unstackSubject(subject), subject);
+});
+
+test("only collapses the leading chain, preserving prefixes in the subject body", () => {
+  assert.equal(unstackSubject("Re: Foo AW: Bar"), "Re: Foo AW: Bar");
+  assert.equal(unstackSubject("Re: AW: Foo AW: Re: Bar"), "AW: Foo AW: Re: Bar");
+  assert.equal(unstackSubject("Re: AW: AWESOME: Foo"), "AW: AWESOME: Foo");
+});
+
+test("collapses stacked prefixes even when the subject body is empty", () => {
+  assert.equal(unstackSubject("Re: AW: Aw:"), "Aw:");
+});
+
 test("leaves a plain AW: subject untouched (no stacking)", () => {
   assert.equal(unstackSubject("AW: Foo"), "AW: Foo");
 });

@@ -1,5 +1,5 @@
 // Listens for newly opened compose tabs of type "reply"; if the subject has
-// a leading reply prefix in front of an "AW: " core, strips the outer prefix.
+// a leading prefix chain containing "AW:", collapses it to a single AW prefix.
 // Pure logic lives in subject.js (`unstackSubject`, exposed as a global).
 //
 // A tab from `tabs.onCreated` may still be loading, in which case

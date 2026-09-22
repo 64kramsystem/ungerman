@@ -1,14 +1,16 @@
 # Ungerman
 
 A small Thunderbird extension that stops reply-prefix stacking when the
-subject already starts with `AW: ` (the German "Antwort" prefix).
+subject's leading prefix chain contains `AW:` (the German "Antwort" prefix).
 
 ## Why
 
 On a German-localized Thunderbird, replying to a message whose subject already
 starts with `AW: ` produces `AW: AW: ...`. On a non-German Thunderbird replying
-to the same message, you get `Re: AW: ...`. Ungerman strips the outer prefix
-so the subject stays `AW: ...`.
+to the same message, you get `Re: AW: ...`. Ungerman collapses the entire leading
+chain to a single `AW:` prefix, even when German and English prefixes alternate.
+It preserves the innermost `AW:` prefix's capitalization and spacing and leaves
+subjects without `AW:` in the leading chain unchanged.
 
 Examples (subject in the compose window):
 
@@ -17,6 +19,8 @@ Examples (subject in the compose window):
 | `AW: AW: Foo`       | `AW: Foo`   |
 | `Re: AW: Foo`       | `AW: Foo`   |
 | `Antwort: AW: Foo`  | `AW: Foo`   |
+| `AW: Re: Aw: Aw: Martin IL MIGLIORE!!!!` | `Aw: Martin IL MIGLIORE!!!!` |
+| `AW: Re: Foo`      | `AW: Foo`   |
 | `AW: Foo`           | `AW: Foo`   |
 | `Re: Foo`           | `Re: Foo`   |
 
