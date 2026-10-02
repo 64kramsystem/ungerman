@@ -10,4 +10,5 @@
 - Do not count HTTP requests from occurrences of `:authority <host>` in `nsHttp:5` logs: HPACK can index that header after its first occurrence. Classify requests using their URLs instead.
 - A locked Firefox test profile can cause immediate exits and empty logs. Wait for the owned test processes to exit before reusing the profile or removing a stale `.parentlock`; never terminate unrelated browser processes.
 - Before changing stream capture, read the add-on's `docs/stream-capture-design.md`. After a related breakage fix, update it very concisely and reassess the capture strategy.
+- When bumping add-on versions in npm metadata, update only the project's root `version` fields in `package.json` and `package-lock.json`, including `packages[""].version`; preserve unrelated dependency versions and download URLs.
 - Commit release changes without updating the version, then run `publish_mozilla_addons <repo_name>:<new_semver> [...]`; allow time for signing and publication.
