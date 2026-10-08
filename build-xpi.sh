@@ -11,6 +11,6 @@ cd "$(dirname "$(readlink -f "$0")")"
 output="ungerman.xpi"
 
 rm -f "$output"
-zip -r -FS "$output" manifest.json subject.js background.js icons
+zip -r -FS "$output" manifest.json subject.js background.js options.html options.js icons
 
 echo "Built $output"

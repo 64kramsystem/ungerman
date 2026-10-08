@@ -39,8 +39,6 @@ forwards.
 For temporary install during development: *Add-ons Manager* → gear icon →
 *Debug Add-ons* → *Load Temporary Add-on* → pick `manifest.json`.
 
-Requires Thunderbird 91 or newer (`background.js` uses `Tab.type`, added in 91).
-
 ## Tests
 
 Pure subject logic lives in `subject.js` and is covered by `subject.test.js`
@@ -60,4 +58,4 @@ No dependencies; requires Node 18+.
 - `background.js` — wires `unstackSubject` to `tabs.onCreated` /
   `compose.getComposeDetails` / `compose.setComposeDetails`.
 - `subject.test.js` — unit tests for `unstackSubject`.
-- `build-xpi.sh` — packages the three runtime files into `ungerman.xpi`.
+- `build-xpi.sh` — packages the runtime files into `ungerman.xpi`.

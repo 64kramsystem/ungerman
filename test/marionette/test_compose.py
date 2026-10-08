@@ -23,7 +23,7 @@ class ComposeTest(unittest.TestCase):
         try:
             xpi = Path(cls.artifacts.name) / "addon.xpi"
             with zipfile.ZipFile(xpi, "w") as archive:
-                for name in ["manifest.json", *MANIFEST["background"]["scripts"]]:
+                for name in ["manifest.json", *MANIFEST["background"]["scripts"], "options.html", "options.js"]:
                     archive.write(ROOT / name, name)
                 for icon in (ROOT / "icons").glob("*"):
                     archive.write(icon, icon.relative_to(ROOT))
@@ -56,13 +56,14 @@ class ComposeTest(unittest.TestCase):
                 const identity = MailServices.accounts.createIdentity();
                 identity.email = "recipient@addon.test";
                 identity.fullName = "Add-on test";
+                identity.doFcc = false;
                 account.addIdentity(identity);
                 const root = server.rootFolder.QueryInterface(Ci.nsIMsgLocalMailFolder);
                 const source = root.createLocalSubfolder("Source");
                 source.QueryInterface(Ci.nsIMsgLocalMailFolder);
                 const header = source.addMessage([
                     "From - Fri Oct 02 12:00:00 2026",
-                    "From: Sender <sender@addon.test>",
+                    'From: "Sender, Test" <sender@addon.test>',
                     "To: Recipient <recipient@addon.test>",
                     "Date: Fri, 02 Oct 2026 12:00:00 +0000",
                     "Message-ID: <compose-fixture@addon.test>",
@@ -77,6 +78,14 @@ class ComposeTest(unittest.TestCase):
             """)
             cls.wait_for('return document.getElementById("tabmail").currentAbout3Pane.gFolder?.URI === window.__composeFixture.source.URI;')
             Addons(cls.marionette).install(str(xpi), temp=True)
+            cls.execute("""
+                const { ExtensionParent } = ChromeUtils.importESModule("resource://gre/modules/ExtensionParent.sys.mjs");
+                const extension = ExtensionParent.GlobalManager.getExtension(arguments[0]);
+                window.__optionsTab = document.getElementById("tabmail").openTab("contentTab", {
+                    url: extension.baseURI.resolve("options.html"),
+                });
+            """, MANIFEST["browser_specific_settings"]["gecko"]["id"])
+            cls.wait_for('return document.getElementById("save")?.disabled === false;', options=True)
         except Exception:
             cls.tearDownClass()
             raise
@@ -96,10 +105,24 @@ class ComposeTest(unittest.TestCase):
         return cls.marionette.execute_script(script, script_args=list(args), sandbox="system")
 
     @classmethod
-    def wait_for(cls, script, *args):
+    def options_execute(cls, script, *args):
+        cls.execute("return true;")
+        result = cls.marionette.execute_async_script("""
+            const [script, args, done] = arguments;
+            // Extension options run in another process; use Marionette's native actor.
+            const actor = window.__optionsTab.browser.browsingContext.currentWindowGlobal.getActor("MarionetteCommands");
+            actor.executeScript(script, args, { sandboxName: "default", newSandbox: true })
+                .then(value => done({ value }), error => done({ error: String(error) }));
+        """, script_args=[script, list(args)], sandbox="system")
+        if "error" in result:
+            raise AssertionError(result["error"])
+        return result.get("value")
+
+    @classmethod
+    def wait_for(cls, script, *args, options=False):
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
-            result = cls.execute(script, *args)
+            result = (cls.options_execute if options else cls.execute)(script, *args)
             if result:
                 return result
             time.sleep(0.05)
@@ -114,6 +137,23 @@ class ComposeTest(unittest.TestCase):
             }
         """)
         self.wait_for('return !Services.wm.getMostRecentWindow("msgcompose");')
+
+    def setUp(self):
+        self.set_rules([])
+
+    def set_rules(self, rules):
+        self.options_execute("""
+            const d = document;
+            for (const button of d.querySelectorAll("tbody button")) button.click();
+            for (const rule of arguments[0]) {
+                d.getElementById("add").click();
+                const row = d.querySelector("tbody").lastElementChild;
+                row.querySelector('[name="email"]').value = rule.email;
+                row.querySelector('[name="prefix"]').value = rule.prefix;
+            }
+            d.querySelector("form").requestSubmit();
+        """, rules)
+        self.wait_for('return document.getElementById("status").textContent === "Saved.";', options=True)
 
     def open_compose(self, kind):
         self.execute("""
@@ -136,6 +176,22 @@ class ComposeTest(unittest.TestCase):
     def subject(self):
         return self.execute('return Services.wm.getMostRecentWindow("msgcompose").document.getElementById("msgSubject").value;')
 
+    def before_send(self, recipient):
+        self.execute("return true;")
+        return self.marionette.execute_async_script("""
+            const [recipient, done] = arguments;
+            const compose = Services.wm.getMostRecentWindow("msgcompose");
+            compose.gMsgCompose.compFields.to = recipient;
+            compose.CompFields2Recipients(compose.gMsgCompose.compFields);
+            // Exercise the real onBeforeSend event, stopping before actual delivery,
+            // as Thunderbird's own compose API tests do.
+            compose.CompleteGenericSendMessage = () => {
+                compose.__sentSubject = compose.gMsgCompose.compFields.subject;
+            };
+            compose.GenericSendMessage(Ci.nsIMsgCompDeliverMode.Later)
+                .then(() => done(compose.__sentSubject));
+        """, script_args=[recipient], sandbox="system")
+
     def test_reply_unstacks_the_subject_in_the_real_compose_window(self):
         self.open_compose("Reply")
         self.wait_for('return Services.wm.getMostRecentWindow("msgcompose").document.getElementById("msgSubject").value === "AW: Project";')
@@ -148,6 +204,59 @@ class ComposeTest(unittest.TestCase):
     def test_forward_keeps_its_forward_prefix(self):
         self.open_compose("ForwardInline")
         self.assertEqual(self.subject(), "Fwd: AW: Project")
+
+    def test_recipient_prefix_is_saved_in_options_and_applied_to_named_recipients(self):
+        self.set_rules([{"email": "SENDER@ADDON.TEST", "prefix": "SV"}])
+        self.execute("""
+            const browser = window.__optionsTab.browser;
+            window.__optionsWindowId = browser.browsingContext.currentWindowGlobal.innerWindowId;
+            browser.reload();
+        """)
+        self.wait_for('return window.__optionsTab.browser.browsingContext.currentWindowGlobal?.innerWindowId !== window.__optionsWindowId;')
+        self.wait_for('return document.getElementById("save")?.disabled === false;', options=True)
+        values = self.options_execute("""
+            const d = document;
+            return Array.from(d.querySelectorAll("tbody input"), input => input.value);
+        """)
+        self.assertEqual(values, ["sender@addon.test", "SV:"])
+        self.open_compose("Reply")
+        self.wait_for('return Services.wm.getMostRecentWindow("msgcompose").document.getElementById("msgSubject").value === "SV: Project";')
+
+    def test_configured_rule_does_not_change_forward(self):
+        self.set_rules([{"email": "sender@addon.test", "prefix": "SV:"}])
+        self.open_compose("ForwardInline")
+        self.assertEqual(self.subject(), "Fwd: AW: Project")
+
+    def test_reply_to_all_uses_the_configured_prefix(self):
+        self.set_rules([{"email": "sender@addon.test", "prefix": "SV:"}])
+        self.open_compose("ReplyAll")
+        self.wait_for('return Services.wm.getMostRecentWindow("msgcompose").document.getElementById("msgSubject").value === "SV: Project";')
+
+    def test_changed_recipient_is_rechecked_at_send_time(self):
+        self.set_rules([
+            {"email": "sender@addon.test", "prefix": "SV:"},
+            {"email": "other@addon.test", "prefix": "Antwort:"},
+        ])
+        self.open_compose("Reply")
+        self.wait_for('return Services.wm.getMostRecentWindow("msgcompose").document.getElementById("msgSubject").value === "SV: Project";')
+        self.assertEqual(self.before_send('"Other, Person" <other@addon.test>'), "Antwort: Project")
+
+    def test_deleted_rule_restores_default_before_sending(self):
+        self.set_rules([{"email": "sender@addon.test", "prefix": "SV:"}])
+        self.open_compose("Reply")
+        self.wait_for('return Services.wm.getMostRecentWindow("msgcompose").document.getElementById("msgSubject").value === "SV: Project";')
+        self.set_rules([])
+        self.assertEqual(self.before_send("sender@addon.test"), "AW: Project")
+
+    def test_forward_is_unchanged_at_send_time_even_with_a_matching_rule(self):
+        self.set_rules([{"email": "sender@addon.test", "prefix": "SV:"}])
+        self.open_compose("ForwardInline")
+        self.assertEqual(self.before_send("sender@addon.test"), "Fwd: AW: Project")
+
+    def test_new_message_is_unchanged_at_send_time_even_with_a_matching_rule(self):
+        self.set_rules([{"email": "sender@addon.test", "prefix": "SV:"}])
+        self.open_compose("New")
+        self.assertEqual(self.before_send("sender@addon.test"), "Re: AW: Deliberate new subject")
 
 
 if __name__ == "__main__":

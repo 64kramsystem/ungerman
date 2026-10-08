@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Ungerman — Reply prefixes</title>
+    <style>
+      :root { color-scheme: light dark; font: menu; }
+      body { max-width: 48rem; margin: 2rem auto; padding: 0 1rem; }
+      p { line-height: 1.5; }
+      table { width: 100%; border-spacing: 0 .5rem; }
+      th { text-align: left; }
+      td { padding-right: .5rem; }
+      input { box-sizing: border-box; width: 100%; padding: .4rem; }
+      button { padding: .4rem .8rem; }
+      .actions { display: flex; align-items: center; gap: .75rem; margin-top: 1rem; }
+    </style>
+  </head>
+  <body>
+    <h1>Reply prefixes</h1>
+    <p>Choose the subject prefix for replies to specific email addresses. Matches use the To recipients and ignore email-address case. The first matching row wins.</p>
+    <p>Other replies keep Ungerman’s existing AW unstacking. New messages and forwards are unchanged. Rules are applied when a reply opens and checked again when sending.</p>
+    <form>
+      <table>
+        <thead><tr><th>Email address</th><th>Prefix</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="actions">
+        <button id="add" type="button" disabled>Add recipient</button>
+        <button id="save" type="submit" disabled>Save</button>
+        <span id="status" role="status"></span>
+      </div>
+    </form>
+    <template>
+      <tr>
+        <td><input type="email" name="email" aria-label="Email address" placeholder="person@example.com" required></td>
+        <td><input name="prefix" aria-label="Reply prefix" placeholder="AW:" pattern=".*\S.*" required></td>
+        <td><button type="button">Remove</button></td>
+      </tr>
+    </template>
+    <script src="options.js"></script>
+  </body>
+</html>

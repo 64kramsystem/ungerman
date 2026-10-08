@@ -1,37 +1,52 @@
-// Listens for newly opened compose tabs of type "reply"; if the subject has
-// a leading prefix chain containing "AW:", collapses it to a single AW prefix.
-// Pure logic lives in subject.js (`unstackSubject`, exposed as a global).
-//
-// A tab from `tabs.onCreated` may still be loading, in which case
-// `getComposeDetails` can come back before the subject is populated and the
-// fix silently no-ops. So we also re-run on `tabs.onUpdated` once the compose
-// tab reaches status "complete". `maybeFixComposeTab` is idempotent
-// (re-running on an already-unstacked subject changes nothing), so the two
-// entry points can't double-strip.
+const changedSubjects = new Map();
+
+async function getReplySubject(tabId, details) {
+  if (details.type !== "reply") return details.subject;
+  const { recipientPrefixes = [] } = await browser.storage.local.get("recipientPrefixes");
+  const recipients = await browser.messengerUtilities.parseMailboxString(details.to.join(","));
+  const rule = recipientPrefixes.find(({ email }) =>
+    recipients.some(recipient => recipient.email?.toLowerCase() === email.toLowerCase())
+  );
+  const previous = changedSubjects.get(tabId);
+  // Reuse the original subject if only our rewrite changed it. This lets a changed
+  // recipient or deleted rule undo the previous prefix without undoing the user's edits.
+  const original = details.subject === previous?.applied ? previous.original : details.subject;
+  const subject = replySubject(original, rule?.prefix);
+  changedSubjects.set(tabId, { original, applied: subject });
+  return subject;
+}
 
 async function maybeFixComposeTab(tabId) {
   let details;
   try {
     details = await browser.compose.getComposeDetails(tabId);
-  } catch (e) {
+  } catch {
     return;
   }
-  if (details.type !== "reply") return;
-  const fixed = unstackSubject(details.subject);
-  if (fixed !== details.subject) {
-    await browser.compose.setComposeDetails(tabId, { subject: fixed });
+  // onCreated can arrive before the subject is populated; onUpdated handles that case.
+  if (!details.subject) return;
+  const subject = await getReplySubject(tabId, details);
+  if (subject !== details.subject) {
+    await browser.compose.setComposeDetails(tabId, { subject });
   }
 }
 
-browser.tabs.onCreated.addListener(async (tab) => {
-  if (tab.type !== "messageCompose") return;
-  await maybeFixComposeTab(tab.id);
+browser.tabs.onCreated.addListener(async tab => {
+  if (tab.type === "messageCompose") await maybeFixComposeTab(tab.id);
 });
 
 browser.tabs.onUpdated.addListener(
   (tabId, changeInfo, tab) => {
-    if (tab.type !== "messageCompose" || changeInfo.status !== "complete") return;
-    maybeFixComposeTab(tabId);
+    if (tab.type === "messageCompose" && changeInfo.status === "complete") {
+      return maybeFixComposeTab(tabId);
+    }
   },
   { properties: ["status"] }
 );
+
+browser.tabs.onRemoved.addListener(tabId => changedSubjects.delete(tabId));
+
+browser.compose.onBeforeSend.addListener(async (tab, details) => {
+  const subject = await getReplySubject(tab.id, details);
+  if (subject !== details.subject) return { details: { subject } };
+});

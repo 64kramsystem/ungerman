@@ -5,13 +5,18 @@ const { join } = require("node:path");
 const vm = require("node:vm");
 
 function startBackground() {
-  const state = { details: { type: "reply", subject: "Re: AW: Project" } };
+  const state = {
+    details: { type: "reply", subject: "Re: AW: Project", to: ["sender@addon.test"] },
+    rules: [],
+    recipients: [{ email: "sender@addon.test" }],
+  };
   const reads = [];
   const writes = [];
   const listeners = {};
   const context = vm.createContext({
     browser: {
       compose: {
+        onBeforeSend: { addListener(fn) { listeners.beforeSend = fn; } },
         async getComposeDetails(id) {
           reads.push(id);
           if (state.error) throw state.error;
@@ -25,7 +30,10 @@ function startBackground() {
       tabs: {
         onCreated: { addListener(fn) { listeners.created = fn; } },
         onUpdated: { addListener(fn) { listeners.updated = fn; } },
+        onRemoved: { addListener(fn) { listeners.removed = fn; } },
       },
+      storage: { local: { async get() { return { recipientPrefixes: state.rules }; } } },
+      messengerUtilities: { async parseMailboxString() { return state.recipients; } },
     },
   });
   for (const name of ["subject.js", "background.js"]) {
@@ -34,7 +42,7 @@ function startBackground() {
   return { state, reads, writes, listeners };
 }
 
-// The updated listener intentionally has no return value; drain its async API work.
+// Drain async event work when the event dispatcher does not await it.
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
 test("compose creation normalizes the reply using its actual tab ID", async () => {
@@ -95,4 +103,76 @@ test("a closed or not-yet-ready compose tab is ignored and later events still wo
   state.error = null;
   await listeners.created({ id: 24, type: "messageCompose" });
   assert.deepEqual(writes, [{ id: 24, subject: "AW: Project" }]);
+});
+
+test("recipient rules match exact addresses without case sensitivity", async () => {
+  const { listeners, state } = startBackground();
+  state.rules = [{ email: "SENDER@ADDON.TEST", prefix: "SV:" }];
+  await listeners.created({ id: 23, type: "messageCompose" });
+  assert.equal(state.details.subject, "SV: Project");
+});
+
+test("unmatched recipients retain AW unstacking", async () => {
+  const { listeners, state } = startBackground();
+  state.rules = [{ email: "other@addon.test", prefix: "SV:" }];
+  await listeners.created({ id: 23, type: "messageCompose" });
+  assert.equal(state.details.subject, "AW: Project");
+});
+
+test("the first matching rule wins when several To recipients have rules", async () => {
+  const { listeners, state } = startBackground();
+  state.recipients.push({ email: "other@addon.test" });
+  state.rules = [
+    { email: "other@addon.test", prefix: "SV:" },
+    { email: "sender@addon.test", prefix: "AW:" },
+  ];
+  await listeners.created({ id: 23, type: "messageCompose" });
+  assert.equal(state.details.subject, "SV: Project");
+});
+
+test("before sending, a changed recipient replaces the previous custom prefix", async () => {
+  const { listeners, state } = startBackground();
+  state.rules = [
+    { email: "sender@addon.test", prefix: "SV:" },
+    { email: "other@addon.test", prefix: "Antwort:" },
+  ];
+  await listeners.created({ id: 23, type: "messageCompose" });
+  assert.equal(state.details.subject, "SV: Project");
+  state.recipients = [{ email: "other@addon.test" }];
+  const result = await listeners.beforeSend({ id: 23 }, state.details);
+  assert.equal(result.details.subject, "Antwort: Project");
+});
+
+test("removing a rule restores the original fallback without replacing an edited body", async () => {
+  const { listeners, state } = startBackground();
+  state.rules = [{ email: "sender@addon.test", prefix: "SV:" }];
+  await listeners.created({ id: 23, type: "messageCompose" });
+  state.rules = [];
+  const result = await listeners.beforeSend({ id: 23 }, state.details);
+  assert.equal(result.details.subject, "AW: Project");
+  state.details.subject = "My own subject";
+  assert.equal(await listeners.beforeSend({ id: 23 }, state.details), undefined);
+});
+
+test("configured prefixes stay unstacked across repeated events and sending", async () => {
+  const { listeners, state, writes } = startBackground();
+  state.rules = [{ email: "sender@addon.test", prefix: "SV:" }];
+  state.details.subject = "Re: SV: AW: SV: Project";
+  await listeners.created({ id: 23, type: "messageCompose" });
+  await listeners.updated(23, { status: "complete" }, { type: "messageCompose" });
+  assert.equal(state.details.subject, "SV: Project");
+  assert.equal(writes.length, 1);
+  assert.equal(await listeners.beforeSend({ id: 23 }, state.details), undefined);
+});
+
+test("custom rules do not change new messages, forwards or drafts, including at send time", async () => {
+  for (const type of ["new", "forward", "draft"]) {
+    const { listeners, state, writes } = startBackground();
+    state.rules = [{ email: "sender@addon.test", prefix: "SV:" }];
+    state.details.type = type;
+    await listeners.created({ id: 23, type: "messageCompose" });
+    await listeners.updated(23, { status: "complete" }, { type: "messageCompose" });
+    assert.equal(await listeners.beforeSend({ id: 23 }, state.details), undefined);
+    assert.deepEqual(writes, []);
+  }
 });

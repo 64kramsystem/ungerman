@@ -1,6 +1,6 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { unstackSubject } = require("./subject.js");
+const { unstackSubject, replySubject } = require("./subject.js");
 
 test("strips Re: when the underlying subject already starts with AW:", () => {
   assert.equal(unstackSubject("Re: AW: Foo"), "AW: Foo");
@@ -81,4 +81,29 @@ test("returns undefined unchanged", () => {
 
 test("does not strip when AW is part of a word (e.g. 'AWESOME:')", () => {
   assert.equal(unstackSubject("AWESOME: Foo"), "AWESOME: Foo");
+});
+
+test("a configured prefix replaces and unstacks standard and custom prefixes", () => {
+  for (const subject of ["Re: Topic", "AW: Re: Topic", "Re: SV: SV: Topic", "SV: AW: SV: Topic"]) {
+    const fixed = replySubject(subject, "SV:");
+    assert.equal(fixed, "SV: Topic");
+    assert.equal(replySubject(fixed, "SV:"), fixed);
+  }
+});
+
+test("custom prefixes are literal and only the leading chain is removed", () => {
+  assert.equal(replySubject("Re: [Reply]+: [Reply]+: Topic", "[Reply]+:"), "[Reply]+: Topic");
+  assert.equal(replySubject("Re: Subject SV: Re: details", "SV:"), "SV: Subject SV: Re: details");
+  assert.equal(replySubject("Re: AWESOME: Topic", "AW:"), "AW: AWESOME: Topic");
+});
+
+test("custom prefix matching ignores case and handles empty subjects", () => {
+  assert.equal(replySubject("re:sv:Sv:Topic", "SV:"), "SV: Topic");
+  assert.equal(replySubject("", "SV:"), "SV:");
+  assert.equal(replySubject("Re: SV:", "SV:"), "SV:");
+});
+
+test("without a recipient prefix, existing behavior remains intact", () => {
+  assert.equal(replySubject("Re: Aw: Topic"), "Aw: Topic");
+  assert.equal(replySubject("Re: Topic"), "Re: Topic");
 });
