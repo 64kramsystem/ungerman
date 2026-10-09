@@ -1,0 +1,1 @@
+@AGENTS.mozilla-addons.md
