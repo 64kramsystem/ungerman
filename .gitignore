@@ -1,2 +1,4 @@
 *.xpi
 /AGENTS.mozilla-addons.md
+/AGENTS.development.md
+/AGENTS.git.md
